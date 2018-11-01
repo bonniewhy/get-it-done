@@ -1,4 +1,4 @@
-from flask import Flask, request, redirect, render_template, session
+from flask import Flask, request, redirect, render_template, session, flash
 from flask_sqlalchemy import SQLAlchemy
 
 app = Flask(__name__)
@@ -9,28 +9,32 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://get-it-done:beproductiv
 app.config['SQLALCHEMY_ECHO'] = True
 # Create a database that we can use within the Python code. Finally linking all of this together.
 db = SQLAlchemy(app)
+app.secret_key = 'y337kGcys&zP3B'
 
 # DB is the object we created above, and it has an object "Model" inside of it
 class Task(db.Model):
     id = db.Column(db.Integer, primary_key = True) # Gives each of our task objects its own unique Primary Key ID
     name = db.Column(db.String(120))
     completed = db.Column(db.Boolean) # Make a new column to say whether or not the task has been completed by having a Boolean value
+    owner_id = db.Column(db.Integer, db.ForeignKey('user.id'))
 
-    def __init__(self, name): # Takes the user defined task as the name variable.
+    def __init__(self, name, owner): # Takes the user defined task as the name variable.
         self.name = name
         self.completed = False
+        self.owner = owner
 
 class User(db.Model):
 
     id = db.Column(db.Integer, primary_key = True)
     email = db.Column(db.String(120), unique = True) # Make sure you can't register two records with the same email
     password = db.Column(db.String(120))
+    tasks = db.relationship('Task', backref = 'owner')
 
     def __init__(self, email, password):
         self.email = email
         self.password = password
 
-@app.before_request
+@app.before_request # Filter incoming requests to check if someone is "logged in"
 def require_login():
     allowed_routes = ['login', 'register']
     if request.endpoint not in allowed_routes and 'email' not in session:
@@ -44,10 +48,10 @@ def login():
         user = User.query.filter_by(email=email).first()
         if user and user.password == password:
             session['email'] = email
+            flash("Logged in")
             return redirect('/')
         else:
-            # TODO -- Tell them why the login failed.
-            return '<h1>Error!</h1>'
+            flash("User password incorrect, or user did not exist.", "error")
 
     return render_template('login.html')
 
@@ -82,17 +86,19 @@ def logout():
 @app.route('/', methods=['POST', 'GET'])
 def index():
 
+    owner = User.query.filter_by(email=session['email']).first()
+
     if request.method == 'POST':
         task_name = request.form['task']
-        new_task = Task(task_name)
+        new_task = Task(task_name, owner)
         db.session.add(new_task)
         db.session.commit()
 
     # Will get all rows from the db.
     # tasks = Task.query.all()
     # Add a filter by to get only the non-complete tasks to list out.
-    tasks = Task.query.filter_by(completed = False).all()
-    completed_tasks = Task.query.filter_by(completed = True).all()
+    tasks = Task.query.filter_by(completed = False, owner = owner).all()
+    completed_tasks = Task.query.filter_by(completed = True, owner = owner).all()
 
     return render_template('todos.html', title = "Get It Done!", tasks = tasks, completed_tasks = completed_tasks)
 
